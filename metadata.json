@@ -1,0 +1,7 @@
+{
+  "name": "HS - Busca Contatos",
+  "description": "Uma aplicação para encontrar e qualificar contatos de negócios locais usando Google Maps e Gemini AI, com foco no consentimento do usuário e privacidade de dados.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
