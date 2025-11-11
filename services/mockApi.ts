@@ -1,302 +1,257 @@
-import { User, Contato, Place, Role, UserStatus, ApiKey, Webhook, AuditLog } from '../types';
 
-const generateId = (): string => Math.random().toString(36).substring(2, 11);
-const generateApiKey = (): string => `sk_live_${Math.random().toString(36).substring(2, 26)}`;
+import { User, Contato, ApiKey, Webhook, AuditLog, UserStatus, Role, Place } from '../types';
 
-const DB_KEYS = {
-    USERS: 'buscacontatos_users',
-    CONTATOS: 'buscacontatos_contatos',
-    API_KEYS: 'buscacontatos_apikeys',
-    WEBHOOKS: 'buscacontatos_webhooks',
-    AUDIT_LOGS: 'buscacontatos_auditlogs',
+// --- MOCK DATABASE ---
+const DB_KEY = 'hs-busca-contatos-db';
+
+interface Database {
+  users: User[];
+  contatos: Record<string, Contato[]>; // Stored per user ID
+  apiKeys: Record<string, ApiKey[]>;
+  webhooks: Record<string, Webhook[]>;
+  auditLogs: AuditLog[];
+  currentUser: string | null;
+}
+
+const getDb = (): Database => {
+  try {
+    const data = localStorage.getItem(DB_KEY);
+    if (data) {
+      return JSON.parse(data);
+    }
+  } catch (error) {
+    console.error("Failed to parse DB from localStorage", error);
+  }
+  return {
+    users: [],
+    contatos: {},
+    apiKeys: {},
+    webhooks: {},
+    auditLogs: [],
+    currentUser: null,
+  };
 };
 
-const initialUsers: User[] = [
-    {
-        id: 'user_admin',
-        name: 'Admin User',
-        email: 'admin@example.com',
-        role: Role.ADMIN,
-        status: UserStatus.APPROVED,
-        createdAt: new Date('2023-10-01T10:00:00Z').toISOString(),
-        emailVerified: true,
-    },
-    {
-        id: 'user_regular',
-        name: 'Regular User',
-        email: 'user@example.com',
-        role: Role.USER,
-        status: UserStatus.APPROVED,
-        createdAt: new Date('2023-10-02T11:00:00Z').toISOString(),
-        emailVerified: true,
-    },
-    {
-        id: 'user_pending',
-        name: 'Pending User',
-        email: 'pending@example.com',
-        role: Role.USER,
-        status: UserStatus.PENDING,
-        createdAt: new Date('2023-10-03T12:00:00Z').toISOString(),
-        emailVerified: false,
-    },
-];
+const saveDb = (db: Database) => {
+  try {
+    localStorage.setItem(DB_KEY, JSON.stringify(db));
+  } catch (error) {
+    console.error("Failed to save DB to localStorage", error);
+  }
+};
 
-// Helper to decode a mock JWT payload (for simulation purposes only)
-function decodeJwtPayload(token: string) {
-    try {
-        const base64Url = token.split('.')[1];
-        const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
-        const jsonPayload = decodeURIComponent(atob(base64).split('').map(function(c) {
-            return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
-        }).join(''));
+const initDb = () => {
+  let db = getDb();
+  if (db.users.length === 0) {
+    db.users = [
+      { id: 'user-1', name: 'Admin User', email: 'admin@test.com', password: 'admin', role: Role.ADMIN, status: UserStatus.APPROVED, createdAt: new Date().toISOString(), emailVerified: true },
+      { id: 'user-2', name: 'Regular User', email: 'user@test.com', password: 'user', role: Role.USER, status: UserStatus.APPROVED, createdAt: new Date().toISOString(), emailVerified: true },
+      { id: 'user-3', name: 'Pending User', email: 'pending@test.com', password: 'pending', role: Role.USER, status: UserStatus.PENDING, createdAt: new Date().toISOString(), emailVerified: true },
+    ];
+    saveDb(db);
+  }
+};
 
-        return JSON.parse(jsonPayload);
-    } catch (e) {
-        console.error("Failed to decode mock JWT", e);
-        // For this simulation, we'll return a hardcoded user if decoding fails.
-        // In a real app, this would be a critical error.
-        return {
-          email: 'google.user@example.com',
-          name: 'Google User',
-          picture: 'https://lh3.googleusercontent.com/a/ACg8ocJ-2xH2j-4kri4w-2244a-z2z2z-2z2z2z=s96-c',
-          sub: `google-id-${generateId()}`
-        };
-    }
-}
+initDb();
 
+// --- UTILS ---
+const simulateDelay = (ms: number = 500) => new Promise(res => setTimeout(res, ms));
 
-class MockApi {
-    constructor() {
-        this.initializeDb();
-    }
+const createLog = (actorId: string, action: string, targetId: string, details: string) => {
+    const db = getDb();
+    const actor = db.users.find(u => u.id === actorId);
+    const target = db.users.find(u => u.id === targetId);
+    if (!actor) return;
 
-    private initializeDb() {
-        if (!localStorage.getItem(DB_KEYS.USERS)) {
-            localStorage.setItem(DB_KEYS.USERS, JSON.stringify(initialUsers));
-        }
-        if (!localStorage.getItem(DB_KEYS.CONTATOS)) {
-            localStorage.setItem(DB_KEYS.CONTATOS, JSON.stringify({}));
-        }
-        if (!localStorage.getItem(DB_KEYS.API_KEYS)) {
-            localStorage.setItem(DB_KEYS.API_KEYS, JSON.stringify({}));
-        }
-        if (!localStorage.getItem(DB_KEYS.WEBHOOKS)) {
-            localStorage.setItem(DB_KEYS.WEBHOOKS, JSON.stringify({}));
-        }
-         if (!localStorage.getItem(DB_KEYS.AUDIT_LOGS)) {
-            localStorage.setItem(DB_KEYS.AUDIT_LOGS, JSON.stringify([]));
-        }
-    }
+    const log: AuditLog = {
+        id: `log-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        actor: { id: actor.id, name: actor.name },
+        action,
+        target: target ? { id: target.id, name: target.name } : { id: targetId, name: 'System' },
+        details
+    };
+    db.auditLogs.unshift(log);
+    saveDb(db);
+};
 
-    private _get<T>(key: string, defaultValue: T): T {
-        try {
-            const item = localStorage.getItem(key);
-            return item ? JSON.parse(item) : defaultValue;
-        } catch (error) {
-            console.error(`Error getting item ${key} from localStorage`, error);
-            return defaultValue;
-        }
-    }
+// --- API FUNCTIONS ---
 
-    private _set<T>(key: string, value: T): void {
-        try {
-            localStorage.setItem(key, JSON.stringify(value));
-        } catch (error) {
-            console.error(`Error setting item ${key} in localStorage`, error);
-        }
+export const login = async (email: string, password_unused: string): Promise<User> => {
+    await simulateDelay();
+    const db = getDb();
+    const user = db.users.find(u => u.email.toLowerCase() === email.toLowerCase());
+    
+    if (!user) {
+        throw new Error('Usuário não encontrado.');
     }
     
-    private _addAuditLog(actor: User, action: string, target: { id: string, name: string }, details: string): void {
-        const logs = this._get<AuditLog[]>(DB_KEYS.AUDIT_LOGS, []);
-        const newLog: AuditLog = {
-            id: generateId(),
-            timestamp: new Date().toISOString(),
-            actor: { id: actor.id, name: actor.name },
-            action,
-            target,
-            details
-        };
-        this._set(DB_KEYS.AUDIT_LOGS, [newLog, ...logs]);
-    }
-
-    // --- Auth ---
-    async login(email: string, password: string): Promise<User | null> {
-        console.log(`Attempting login for: ${email}`);
-        await new Promise(resolve => setTimeout(resolve, 500)); // Simulate network delay
-        const users = this._get<User[]>(DB_KEYS.USERS, []);
-        const user = users.find(u => u.email === email);
-        
-        // In a real app, you'd check a hashed password. Here we allow any password for simplicity.
-        if (user && user.status === UserStatus.APPROVED) {
-            return user;
-        }
-        if (user && user.status !== UserStatus.APPROVED) {
-            throw new Error(`Your account status is: ${user.status}. Please contact an administrator.`);
-        }
-        
-        throw new Error('Invalid email or password.');
-    }
-
-    async loginWithGoogle(credential: string): Promise<User> {
-        await new Promise(resolve => setTimeout(resolve, 500));
-        const users = this._get<User[]>(DB_KEYS.USERS, []);
-        
-        // In a real app, you would verify this token with Google's servers.
-        // Here, we'll just simulate decoding it.
-        const payload = decodeJwtPayload(credential);
-        const { email, name, picture, sub: googleId } = payload;
-        
-        let user = users.find(u => u.email === email);
-
-        if (user) {
-            // If user exists, update their googleId and picture if not present
-            user.googleId = user.googleId || googleId;
-            user.picture = user.picture || picture;
-            this._set(DB_KEYS.USERS, users);
-            return user;
-        } else {
-            // If user does not exist, create a new one.
-            // Google-verified users are approved by default.
-            const newUser: User = {
-                id: `user_${generateId()}`,
-                name,
-                email,
-                role: Role.USER,
-                status: UserStatus.APPROVED,
-                createdAt: new Date().toISOString(),
-                emailVerified: true,
-                googleId,
-                picture
-            };
-            const updatedUsers = [...users, newUser];
-            this._set(DB_KEYS.USERS, updatedUsers);
-            return newUser;
-        }
-    }
-
-    // --- Contatos ---
-    async getContatos(userId: string): Promise<Contato[]> {
-        const allContatos = this._get<Record<string, Contato[]>>(DB_KEYS.CONTATOS, {});
-        return allContatos[userId] || [];
-    }
-
-    async saveContatos(userId: string, newContatos: Contato[]): Promise<Contato[]> {
-        const allContatos = this._get<Record<string, Contato[]>>(DB_KEYS.CONTATOS, {});
-        const userContatos = allContatos[userId] || [];
-        const updatedContatos = [...userContatos, ...newContatos];
-        allContatos[userId] = updatedContatos;
-        this._set(DB_KEYS.CONTATOS, allContatos);
-        return updatedContatos;
-    }
-
-    async removeContato(userId: string, placeId: string): Promise<boolean> {
-        const allContatos = this._get<Record<string, Contato[]>>(DB_KEYS.CONTATOS, {});
-        const userContatos = allContatos[userId] || [];
-        allContatos[userId] = userContatos.filter(contato => contato.place_id !== placeId);
-        this._set(DB_KEYS.CONTATOS, allContatos);
-        return true;
-    }
-
-    // --- API Keys ---
-    async getApiKeys(userId: string): Promise<ApiKey[]> {
-        const allKeys = this._get<Record<string, ApiKey[]>>(DB_KEYS.API_KEYS, {});
-        return allKeys[userId] || [];
+    if (user.status === UserStatus.BLOCKED) {
+        throw new Error('Sua conta está bloqueada.');
     }
     
-    async createApiKey(userId: string, label: string): Promise<ApiKey> {
-        const allKeys = this._get<Record<string, ApiKey[]>>(DB_KEYS.API_KEYS, {});
-        const userKeys = allKeys[userId] || [];
-        const newKey: ApiKey = {
-            id: generateId(),
-            label,
-            key: generateApiKey(),
-            createdAt: new Date().toISOString()
-        };
-        allKeys[userId] = [...userKeys, newKey];
-        this._set(DB_KEYS.API_KEYS, allKeys);
-        return newKey;
-    }
+    // In a real app, you'd check the password here
+    // For this mock, we'll just log in if the user exists.
 
-    async deleteApiKey(userId: string, keyId: string): Promise<boolean> {
-        const allKeys = this._get<Record<string, ApiKey[]>>(DB_KEYS.API_KEYS, {});
-        const userKeys = allKeys[userId] || [];
-        allKeys[userId] = userKeys.filter(key => key.id !== keyId);
-        this._set(DB_KEYS.API_KEYS, allKeys);
-        return true;
+    db.currentUser = user.id;
+    saveDb(db);
+    return user;
+};
+
+export const logout = async (): Promise<void> => {
+    await simulateDelay(200);
+    const db = getDb();
+    db.currentUser = null;
+    saveDb(db);
+};
+
+export const getCurrentUser = async (): Promise<User | null> => {
+    await simulateDelay(300);
+    const db = getDb();
+    if (!db.currentUser) return null;
+    return db.users.find(u => u.id === db.currentUser) || null;
+};
+
+// --- CONTATOS ---
+export const getSavedContatos = async (userId: string): Promise<Contato[]> => {
+    await simulateDelay();
+    const db = getDb();
+    return db.contatos[userId] || [];
+};
+
+export const saveContatos = async (userId: string, contatos: Contato[]): Promise<Contato[]> => {
+    await simulateDelay();
+    const db = getDb();
+    if (!db.contatos[userId]) {
+        db.contatos[userId] = [];
     }
+    const existingIds = new Set(db.contatos[userId].map(c => c.place_id));
+    const newContatos = contatos.filter(c => !existingIds.has(c.place_id));
+    db.contatos[userId].push(...newContatos);
+    saveDb(db);
+    return db.contatos[userId];
+};
+
+export const removeContato = async (userId: string, place_id: string): Promise<Contato[]> => {
+    await simulateDelay();
+    const db = getDb();
+    if (db.contatos[userId]) {
+        db.contatos[userId] = db.contatos[userId].filter(c => c.place_id !== place_id);
+        saveDb(db);
+    }
+    return db.contatos[userId] || [];
+};
+
+// --- ADMIN ---
+export const adminGetAllUsers = async (): Promise<User[]> => {
+    await simulateDelay();
+    return getDb().users;
+};
+
+export const adminUpdateUser = async (actorId: string, targetId: string, status?: UserStatus, role?: Role): Promise<boolean> => {
+    await simulateDelay();
+    const db = getDb();
+    const user = db.users.find(u => u.id === targetId);
+    if (!user) return false;
     
-    // --- Webhooks ---
-    async getWebhooks(userId: string): Promise<Webhook[]> {
-        const allWebhooks = this._get<Record<string, Webhook[]>>(DB_KEYS.WEBHOOKS, {});
-        return allWebhooks[userId] || [];
+    if (status) {
+        user.status = status;
+        createLog(actorId, `User status updated to ${status}`, targetId, `Status of ${user.email} changed to ${status}.`);
+    }
+    if (role) {
+        user.role = role;
+        createLog(actorId, `User role updated to ${role}`, targetId, `Role of ${user.email} changed to ${role}.`);
     }
 
-    async createWebhook(userId: string, url: string): Promise<Webhook> {
-        const allWebhooks = this._get<Record<string, Webhook[]>>(DB_KEYS.WEBHOOKS, {});
-        const userWebhooks = allWebhooks[userId] || [];
-        const newWebhook: Webhook = {
-            id: generateId(),
-            url,
-            createdAt: new Date().toISOString()
-        };
-        allWebhooks[userId] = [...userWebhooks, newWebhook];
-        this._set(DB_KEYS.WEBHOOKS, allWebhooks);
-        return newWebhook;
-    }
+    saveDb(db);
+    return true;
+};
 
-    async deleteWebhook(userId: string, webhookId: string): Promise<boolean> {
-        const allWebhooks = this._get<Record<string, Webhook[]>>(DB_KEYS.WEBHOOKS, {});
-        const userWebhooks = allWebhooks[userId] || [];
-        allWebhooks[userId] = userWebhooks.filter(wh => wh.id !== webhookId);
-        this._set(DB_KEYS.WEBHOOKS, allWebhooks);
-        return true;
-    }
+export const adminDeleteUser = async (actorId: string, targetId: string): Promise<boolean> => {
+    await simulateDelay();
+    const db = getDb();
+    const userIndex = db.users.findIndex(u => u.id === targetId);
+    if (userIndex === -1) return false;
+
+    const user = db.users[userIndex];
+    createLog(actorId, 'User deleted', targetId, `User ${user.email} was permanently deleted.`);
     
-    // --- Admin ---
-    async getUsers(): Promise<User[]> {
-        return this._get<User[]>(DB_KEYS.USERS, []);
-    }
-
-    async updateUser(actorId: string, targetUserId: string, status?: UserStatus, role?: Role): Promise<boolean> {
-        const users = this._get<User[]>(DB_KEYS.USERS, []);
-        const actor = users.find(u => u.id === actorId);
-        const targetUser = users.find(u => u.id === targetUserId);
-        
-        if (!actor || actor.role !== Role.ADMIN || !targetUser) return false;
-
-        let details = [];
-        if (status && targetUser.status !== status) {
-            details.push(`Status changed from ${targetUser.status} to ${status}`);
-            targetUser.status = status;
-        }
-        if (role && targetUser.role !== role) {
-            details.push(`Role changed from ${targetUser.role} to ${role}`);
-            targetUser.role = role;
-        }
-
-        if (details.length > 0) {
-            this._set(DB_KEYS.USERS, users);
-            this._addAuditLog(actor, 'User Updated', { id: targetUser.id, name: targetUser.name }, details.join('. '));
-        }
-
-        return true;
-    }
-
-    async deleteUser(actorId: string, targetUserId: string): Promise<boolean> {
-        let users = this._get<User[]>(DB_KEYS.USERS, []);
-        const actor = users.find(u => u.id === actorId);
-        const targetUser = users.find(u => u.id === targetUserId);
-
-        if (!actor || actor.role !== Role.ADMIN || !targetUser || actor.id === targetUserId) return false;
-
-        this._set(DB_KEYS.USERS, users.filter(u => u.id !== targetUserId));
-        this._addAuditLog(actor, 'User Deleted', { id: targetUser.id, name: targetUser.name }, `User ${targetUser.email} was permanently deleted.`);
-        return true;
-    }
+    db.users.splice(userIndex, 1);
+    delete db.contatos[targetId];
+    delete db.apiKeys[targetId];
+    delete db.webhooks[targetId];
     
-    async getAuditLogs(): Promise<AuditLog[]> {
-        return this._get<AuditLog[]>(DB_KEYS.AUDIT_LOGS, []).sort((a,b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-    }
-}
+    saveDb(db);
+    return true;
+};
 
-export const mockApi = new MockApi();
+export const adminGetAuditLogs = async (): Promise<AuditLog[]> => {
+    await simulateDelay();
+    return getDb().auditLogs;
+};
+
+// --- INTEGRATIONS ---
+export const getApiKeys = async (userId: string): Promise<ApiKey[]> => {
+    await simulateDelay();
+    return getDb().apiKeys[userId] || [];
+};
+
+export const createApiKey = async (userId: string, label: string): Promise<ApiKey> => {
+    await simulateDelay();
+    const db = getDb();
+    if (!db.apiKeys[userId]) {
+        db.apiKeys[userId] = [];
+    }
+    const newKey: ApiKey = {
+        id: `key-${Date.now()}`,
+        label,
+        key: `sk_live_${[...Array(24)].map(() => Math.random().toString(36)[2]).join('')}`,
+        createdAt: new Date().toISOString(),
+    };
+    db.apiKeys[userId].push(newKey);
+    saveDb(db);
+    return newKey;
+};
+
+export const deleteApiKey = async (userId: string, keyId: string): Promise<boolean> => {
+    await simulateDelay();
+    const db = getDb();
+    if (db.apiKeys[userId]) {
+        db.apiKeys[userId] = db.apiKeys[userId].filter(k => k.id !== keyId);
+        saveDb(db);
+        return true;
+    }
+    return false;
+};
+
+export const getWebhooks = async (userId: string): Promise<Webhook[]> => {
+    await simulateDelay();
+    return getDb().webhooks[userId] || [];
+};
+
+export const createWebhook = async (userId: string, url: string): Promise<Webhook> => {
+    await simulateDelay();
+    const db = getDb();
+    if (!db.webhooks[userId]) {
+        db.webhooks[userId] = [];
+    }
+    const newWebhook: Webhook = {
+        id: `hook-${Date.now()}`,
+        url,
+        createdAt: new Date().toISOString(),
+    };
+    db.webhooks[userId].push(newWebhook);
+    saveDb(db);
+    return newWebhook;
+};
+
+export const deleteWebhook = async (userId: string, webhookId: string): Promise<boolean> => {
+    await simulateDelay();
+    const db = getDb();
+    if (db.webhooks[userId]) {
+        db.webhooks[userId] = db.webhooks[userId].filter(w => w.id !== webhookId);
+        saveDb(db);
+        return true;
+    }
+    return false;
+};
