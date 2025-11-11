@@ -1,4 +1,3 @@
-
 import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import * as mockApi from '../services/mockApi';
 import { User, Contato, Place, UserStatus, Role, AuditLog, ApiKey, Webhook } from '../types';

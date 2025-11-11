@@ -1,5 +1,3 @@
-
-
 import { User, Contato, ApiKey, Webhook, AuditLog, UserStatus, Role, Place } from '../types';
 
 // --- MOCK DATABASE ---
