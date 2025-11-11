@@ -1,4 +1,5 @@
 
+
 import { User, Contato, ApiKey, Webhook, AuditLog, UserStatus, Role, Place } from '../types';
 
 // --- MOCK DATABASE ---
@@ -44,9 +45,12 @@ const initDb = () => {
   let db = getDb();
   if (db.users.length === 0) {
     db.users = [
-      { id: 'user-1', name: 'Admin User', email: 'admin@test.com', password: 'admin', role: Role.ADMIN, status: UserStatus.APPROVED, createdAt: new Date().toISOString(), emailVerified: true },
-      { id: 'user-2', name: 'Regular User', email: 'user@test.com', password: 'user', role: Role.USER, status: UserStatus.APPROVED, createdAt: new Date().toISOString(), emailVerified: true },
-      { id: 'user-3', name: 'Pending User', email: 'pending@test.com', password: 'pending', role: Role.USER, status: UserStatus.PENDING, createdAt: new Date().toISOString(), emailVerified: true },
+      // Fix: Removed 'password' property as it's not defined in the User type.
+      { id: 'user-1', name: 'Admin User', email: 'admin@test.com', role: Role.ADMIN, status: UserStatus.APPROVED, createdAt: new Date().toISOString(), emailVerified: true },
+      // Fix: Removed 'password' property as it's not defined in the User type.
+      { id: 'user-2', name: 'Regular User', email: 'user@test.com', role: Role.USER, status: UserStatus.APPROVED, createdAt: new Date().toISOString(), emailVerified: true },
+      // Fix: Removed 'password' property as it's not defined in the User type.
+      { id: 'user-3', name: 'Pending User', email: 'pending@test.com', role: Role.USER, status: UserStatus.PENDING, createdAt: new Date().toISOString(), emailVerified: true },
     ];
     saveDb(db);
   }
